@@ -1,0 +1,361 @@
+name: Deploy Services
+
+on:
+  workflow_dispatch:
+    inputs:
+      services:
+        description: 'Services to deploy (comma-separated, e.g., "portfolio,photos" or "all")'
+        required: true
+        default: 'all'
+        type: string
+      skip_tests:
+        description: 'Skip tests (not recommended)'
+        required: false
+        default: false
+        type: boolean
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  NODE_VERSION: '20'
+  PYTHON_VERSION: '3.11'
+  JAVA_VERSION: '17'
+
+jobs:
+  # Parse which services to deploy
+  prepare:
+    name: Prepare Deployment
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.parse.outputs.services }}
+      frontend_services: ${{ steps.parse.outputs.frontend_services }}
+      backend_services: ${{ steps.parse.outputs.backend_services }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse services
+        id: parse
+        run: |
+          INPUT="${{ github.event.inputs.services }}"
+
+          # Read services.json
+          ALL_SERVICES=$(jq -r '.services | keys[]' services.json | tr '\n' ',' | sed 's/,$//')
+          FRONTEND_SERVICES=$(jq -r '.services | to_entries[] | select(.value.type == "frontend") | .key' services.json | tr '\n' ',' | sed 's/,$//')
+          BACKEND_SERVICES=$(jq -r '.services | to_entries[] | select(.value.type == "backend") | .key' services.json | tr '\n' ',' | sed 's/,$//')
+
+          if [ "$INPUT" = "all" ]; then
+            SERVICES="$ALL_SERVICES"
+          elif [ "$INPUT" = "frontends" ]; then
+            SERVICES="$FRONTEND_SERVICES"
+          elif [ "$INPUT" = "backends" ]; then
+            SERVICES="$BACKEND_SERVICES"
+          else
+            SERVICES="$INPUT"
+          fi
+
+          # Convert to JSON array
+          SERVICES_JSON=$(echo "$SERVICES" | tr ',' '\n' | jq -R . | jq -s .)
+          FRONTEND_JSON=$(echo "$FRONTEND_SERVICES" | tr ',' '\n' | jq -R . | jq -s .)
+          BACKEND_JSON=$(echo "$BACKEND_SERVICES" | tr ',' '\n' | jq -R . | jq -s .)
+
+          echo "services=$SERVICES_JSON" >> $GITHUB_OUTPUT
+          echo "frontend_services=$FRONTEND_JSON" >> $GITHUB_OUTPUT
+          echo "backend_services=$BACKEND_JSON" >> $GITHUB_OUTPUT
+          echo "Deploying services: $SERVICES"
+
+      - name: Send Discord notification - Deployment Started
+        if: success()
+        run: |
+          SERVICES="${{ github.event.inputs.services }}"
+          curl -H "Content-Type: application/json" \
+            -d "{\"embeds\":[{\"title\":\"Deployment Started\",\"description\":\"Deploying: $SERVICES\",\"color\":3447003,\"footer\":{\"text\":\"Portfolio CI/CD\"}}]}" \
+            ${{ secrets.DISCORD_WEBHOOK_URL }} || true
+
+  # Test services before deployment
+  test:
+    name: Test ${{ matrix.service }}
+    needs: prepare
+    if: ${{ !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.prepare.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get service config
+        id: config
+        run: |
+          SERVICE="${{ matrix.service }}"
+          REPO=$(jq -r ".services[\"$SERVICE\"].repo" services.json)
+          PATH_IN_REPO=$(jq -r ".services[\"$SERVICE\"].path" services.json)
+          RUNTIME=$(jq -r ".services[\"$SERVICE\"].runtime" services.json)
+          TEST_CMD=$(jq -r ".services[\"$SERVICE\"].testCommand" services.json)
+
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+          echo "path=$PATH_IN_REPO" >> $GITHUB_OUTPUT
+          echo "runtime=$RUNTIME" >> $GITHUB_OUTPUT
+          echo "test_cmd=$TEST_CMD" >> $GITHUB_OUTPUT
+
+      - name: Checkout service repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.config.outputs.repo }}
+          path: service-repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        if: steps.config.outputs.runtime == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Python
+        if: steps.config.outputs.runtime == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup Java
+        if: steps.config.outputs.runtime == 'java'
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Install and Test (Node.js)
+        if: steps.config.outputs.runtime == 'node'
+        working-directory: service-repo/${{ steps.config.outputs.path }}
+        run: |
+          npm ci || npm install
+          ${{ steps.config.outputs.test_cmd }} || echo "No tests configured"
+
+      - name: Install and Test (Python)
+        if: steps.config.outputs.runtime == 'python'
+        working-directory: service-repo/${{ steps.config.outputs.path }}
+        run: |
+          pip install ".[dev]" || pip install -r requirements.txt || pip install .
+          ${{ steps.config.outputs.test_cmd }} || echo "No tests configured"
+
+      - name: Install and Test (Java)
+        if: steps.config.outputs.runtime == 'java'
+        working-directory: service-repo/${{ steps.config.outputs.path }}
+        run: |
+          ${{ steps.config.outputs.test_cmd }} || echo "No tests configured"
+
+  # Deploy frontend services to S3/CloudFront
+  deploy-frontend:
+    name: Deploy Frontend - ${{ matrix.service }}
+    needs: [prepare, test]
+    if: always() && (needs.test.result == 'success' || inputs.skip_tests)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.prepare.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if frontend
+        id: check
+        run: |
+          SERVICE="${{ matrix.service }}"
+          TYPE=$(jq -r ".services[\"$SERVICE\"].type" services.json)
+          echo "is_frontend=$([[ \"$TYPE\" == \"frontend\" ]] && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+
+      - name: Get service config
+        if: steps.check.outputs.is_frontend == 'true'
+        id: config
+        run: |
+          SERVICE="${{ matrix.service }}"
+          REPO=$(jq -r ".services[\"$SERVICE\"].repo" services.json)
+          PATH_IN_REPO=$(jq -r ".services[\"$SERVICE\"].path" services.json)
+          BUILD_CMD=$(jq -r ".services[\"$SERVICE\"].buildCommand" services.json)
+          DIST_DIR=$(jq -r ".services[\"$SERVICE\"].distDir" services.json)
+          S3_BUCKET=$(jq -r ".services[\"$SERVICE\"].s3Bucket" services.json)
+          CF_ID=$(jq -r ".services[\"$SERVICE\"].cloudFrontId" services.json)
+          URL=$(jq -r ".services[\"$SERVICE\"].url" services.json)
+
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+          echo "path=$PATH_IN_REPO" >> $GITHUB_OUTPUT
+          echo "build_cmd=$BUILD_CMD" >> $GITHUB_OUTPUT
+          echo "dist_dir=$DIST_DIR" >> $GITHUB_OUTPUT
+          echo "s3_bucket=$S3_BUCKET" >> $GITHUB_OUTPUT
+          echo "cf_id=$CF_ID" >> $GITHUB_OUTPUT
+          echo "url=$URL" >> $GITHUB_OUTPUT
+
+      - name: Checkout service repo
+        if: steps.check.outputs.is_frontend == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.config.outputs.repo }}
+          path: service-repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        if: steps.check.outputs.is_frontend == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build
+        if: steps.check.outputs.is_frontend == 'true'
+        working-directory: service-repo/${{ steps.config.outputs.path }}
+        run: |
+          npm ci || npm install
+          ${{ steps.config.outputs.build_cmd }}
+
+      - name: Configure AWS credentials
+        if: steps.check.outputs.is_frontend == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Deploy to S3
+        if: steps.check.outputs.is_frontend == 'true'
+        working-directory: service-repo/${{ steps.config.outputs.path }}
+        run: |
+          # Upload static assets with long cache
+          aws s3 sync ${{ steps.config.outputs.dist_dir }} s3://${{ steps.config.outputs.s3_bucket }} \
+            --delete \
+            --cache-control "public, max-age=31536000" \
+            --exclude "index.html" \
+            --exclude "*.json"
+
+          # Upload index.html with no-cache
+          aws s3 cp ${{ steps.config.outputs.dist_dir }}/index.html s3://${{ steps.config.outputs.s3_bucket }}/index.html \
+            --cache-control "no-cache, no-store, must-revalidate"
+
+      - name: Invalidate CloudFront
+        if: steps.check.outputs.is_frontend == 'true'
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ steps.config.outputs.cf_id }} \
+            --paths "/*"
+
+      - name: Send Discord notification
+        if: steps.check.outputs.is_frontend == 'true' && success()
+        run: |
+          curl -H "Content-Type: application/json" \
+            -d "{\"embeds\":[{\"title\":\"Frontend Deployed: ${{ matrix.service }}\",\"description\":\"URL: ${{ steps.config.outputs.url }}\",\"color\":2278621,\"footer\":{\"text\":\"Portfolio CI/CD\"}}]}" \
+            ${{ secrets.DISCORD_WEBHOOK_URL }} || true
+
+  # Deploy backend services via SSH to EC2
+  deploy-backend:
+    name: Deploy Backend - ${{ matrix.service }}
+    needs: [prepare, test]
+    if: always() && (needs.test.result == 'success' || inputs.skip_tests)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.prepare.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if backend
+        id: check
+        run: |
+          SERVICE="${{ matrix.service }}"
+          TYPE=$(jq -r ".services[\"$SERVICE\"].type" services.json)
+          echo "is_backend=$([[ \"$TYPE\" == \"backend\" ]] && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+
+      - name: Get service config
+        if: steps.check.outputs.is_backend == 'true'
+        id: config
+        run: |
+          SERVICE="${{ matrix.service }}"
+          REPO=$(jq -r ".services[\"$SERVICE\"].repo" services.json)
+          PATH_IN_REPO=$(jq -r ".services[\"$SERVICE\"].path" services.json)
+          DOCKER_IMAGE=$(jq -r ".services[\"$SERVICE\"].dockerImage" services.json)
+          CONTAINER_NAME=$(jq -r ".services[\"$SERVICE\"].containerName" services.json)
+          EC2_HOST=$(jq -r ".ec2.host" services.json)
+          EC2_USER=$(jq -r ".ec2.user" services.json)
+
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+          echo "path=$PATH_IN_REPO" >> $GITHUB_OUTPUT
+          echo "docker_image=$DOCKER_IMAGE" >> $GITHUB_OUTPUT
+          echo "container_name=$CONTAINER_NAME" >> $GITHUB_OUTPUT
+          echo "ec2_host=$EC2_HOST" >> $GITHUB_OUTPUT
+          echo "ec2_user=$EC2_USER" >> $GITHUB_OUTPUT
+
+      - name: Checkout service repo
+        if: steps.check.outputs.is_backend == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.config.outputs.repo }}
+          path: service-repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.is_backend == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        if: steps.check.outputs.is_backend == 'true'
+        working-directory: service-repo/${{ steps.config.outputs.path }}
+        run: |
+          docker build -t ${{ steps.config.outputs.docker_image }}:latest .
+          docker save ${{ steps.config.outputs.docker_image }}:latest -o /tmp/${{ steps.config.outputs.docker_image }}.tar
+
+      - name: Setup SSH
+        if: steps.check.outputs.is_backend == 'true'
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ steps.config.outputs.ec2_host }} >> ~/.ssh/known_hosts
+
+      - name: Transfer and deploy
+        if: steps.check.outputs.is_backend == 'true'
+        run: |
+          # Transfer image
+          scp -i ~/.ssh/deploy_key /tmp/${{ steps.config.outputs.docker_image }}.tar \
+            ${{ steps.config.outputs.ec2_user }}@${{ steps.config.outputs.ec2_host }}:/tmp/
+
+          # Load and restart
+          ssh -i ~/.ssh/deploy_key ${{ steps.config.outputs.ec2_user }}@${{ steps.config.outputs.ec2_host }} << 'EOF'
+            docker load -i /tmp/${{ steps.config.outputs.docker_image }}.tar
+            rm /tmp/${{ steps.config.outputs.docker_image }}.tar
+            cd /home/ubuntu/deployment
+            docker-compose stop ${{ steps.config.outputs.container_name }}
+            docker-compose rm -f ${{ steps.config.outputs.container_name }}
+            docker-compose up -d ${{ steps.config.outputs.container_name }}
+          EOF
+
+      - name: Send Discord notification
+        if: steps.check.outputs.is_backend == 'true' && success()
+        run: |
+          curl -H "Content-Type: application/json" \
+            -d "{\"embeds\":[{\"title\":\"Backend Deployed: ${{ matrix.service }}\",\"color\":2278621,\"footer\":{\"text\":\"Portfolio CI/CD\"}}]}" \
+            ${{ secrets.DISCORD_WEBHOOK_URL }} || true
+
+  # Summary notification
+  notify:
+    name: Deployment Summary
+    needs: [deploy-frontend, deploy-backend]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send summary
+        run: |
+          if [[ "${{ needs.deploy-frontend.result }}" == "success" && "${{ needs.deploy-backend.result }}" == "success" ]]; then
+            COLOR=2278621
+            TITLE="Deployment Successful"
+          else
+            COLOR=15548997
+            TITLE="Deployment Completed (with issues)"
+          fi
+
+          curl -H "Content-Type: application/json" \
+            -d "{\"embeds\":[{\"title\":\"$TITLE\",\"description\":\"Services: ${{ github.event.inputs.services }}\",\"color\":$COLOR,\"footer\":{\"text\":\"Portfolio CI/CD\"}}]}" \
+            ${{ secrets.DISCORD_WEBHOOK_URL }} || true

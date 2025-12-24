@@ -1,0 +1,126 @@
+{
+  "version": "1.0",
+  "domain": "basedsecurity.net",
+  "awsRegion": "us-east-1",
+  "ec2": {
+    "host": "ec2-54-242-15-144.compute-1.amazonaws.com",
+    "user": "ubuntu"
+  },
+  "discord": {
+    "enabled": true
+  },
+  "services": {
+    "portfolio": {
+      "type": "frontend",
+      "repo": "Bigollie8/terminal-portfolio",
+      "path": "frontend",
+      "runtime": "node",
+      "testCommand": "npm test",
+      "buildCommand": "npm run build",
+      "distDir": "dist",
+      "s3Bucket": "portfolio-prod-portfolio-frontend",
+      "cloudFrontId": "E15VHZ20NOJ0RE",
+      "url": "https://portfolio.basedsecurity.net",
+      "healthCheck": "https://portfolio.basedsecurity.net"
+    },
+    "portfolio-backend": {
+      "type": "backend",
+      "repo": "Bigollie8/terminal-portfolio",
+      "path": "backend",
+      "runtime": "node",
+      "testCommand": "npm test",
+      "dockerImage": "portfolio-backend",
+      "containerName": "portfolio-backend",
+      "healthCheck": "https://api.basedsecurity.net/health"
+    },
+    "photos": {
+      "type": "frontend",
+      "repo": "OliverLand0/rapidPhotoFlow",
+      "path": "frontend",
+      "runtime": "node",
+      "testCommand": "npm test",
+      "buildCommand": "npm run build",
+      "distDir": "dist",
+      "s3Bucket": "portfolio-prod-photos-frontend",
+      "cloudFrontId": "E3G0IS14XDZD1G",
+      "url": "https://photos.basedsecurity.net",
+      "healthCheck": "https://photos.basedsecurity.net"
+    },
+    "photos-backend": {
+      "type": "backend",
+      "repo": "OliverLand0/rapidPhotoFlow",
+      "path": "backend",
+      "runtime": "java",
+      "testCommand": "./mvnw test",
+      "dockerImage": "photos-backend",
+      "containerName": "photos-backend",
+      "healthCheck": "https://api.basedsecurity.net/photos/actuator/health"
+    },
+    "photos-ai": {
+      "type": "backend",
+      "repo": "OliverLand0/rapidPhotoFlow",
+      "path": "ai-service",
+      "runtime": "node",
+      "testCommand": "npm test",
+      "dockerImage": "photos-ai",
+      "containerName": "photos-ai",
+      "healthCheck": "https://api.basedsecurity.net/ai/health"
+    },
+    "security": {
+      "type": "frontend",
+      "repo": "Bigollie8/basedSecurityAI",
+      "path": "apps/web",
+      "runtime": "node",
+      "testCommand": "npm test",
+      "buildCommand": "npm run build",
+      "distDir": "dist",
+      "s3Bucket": "portfolio-prod-security-frontend",
+      "cloudFrontId": "E3THVDXE9Y0OUH",
+      "url": "https://security.basedsecurity.net",
+      "healthCheck": "https://security.basedsecurity.net"
+    },
+    "security-backend": {
+      "type": "backend",
+      "repo": "Bigollie8/basedSecurityAI",
+      "path": "apps/api",
+      "runtime": "python",
+      "testCommand": "pytest",
+      "dockerImage": "security-backend",
+      "containerName": "security-backend",
+      "healthCheck": "https://api.basedsecurity.net/security/health"
+    },
+    "shipping": {
+      "type": "frontend",
+      "repo": "Bigollie8/shipping-monitor",
+      "path": "client",
+      "runtime": "node",
+      "testCommand": "npm test",
+      "buildCommand": "npm run build",
+      "distDir": "dist",
+      "s3Bucket": "portfolio-prod-shipping-frontend",
+      "cloudFrontId": "E2KOLBNNUKT40T",
+      "url": "https://shipping.basedsecurity.net",
+      "healthCheck": "https://shipping.basedsecurity.net"
+    },
+    "shipping-backend": {
+      "type": "backend",
+      "repo": "Bigollie8/shipping-monitor",
+      "path": "server",
+      "runtime": "node",
+      "testCommand": "npm test",
+      "dockerImage": "shipping-backend",
+      "containerName": "shipping-backend",
+      "healthCheck": "https://api.basedsecurity.net/shipping/health"
+    },
+    "status-page": {
+      "type": "backend",
+      "repo": "Bigollie8/status-page",
+      "path": ".",
+      "runtime": "node",
+      "testCommand": "npm test",
+      "dockerImage": "status-page",
+      "containerName": "status-page",
+      "healthCheck": "https://api.basedsecurity.net/status/health"
+    }
+  }
+}
