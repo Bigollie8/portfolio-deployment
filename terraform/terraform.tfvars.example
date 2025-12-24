@@ -1,0 +1,39 @@
+# ===========================================
+# AWS Portfolio Deployment Configuration
+# ===========================================
+# Copy this file to terraform.tfvars and fill in your values
+# NEVER commit terraform.tfvars to version control!
+
+# AWS Configuration
+aws_region = "us-east-1"
+
+# Domain Configuration
+# You must own this domain and have it in Route53
+domain_name = "yourdomain.com"
+
+# SSH Key (must exist in AWS EC2 Key Pairs)
+ssh_key_name = "portfolio"
+
+# Project Prefix (used for naming resources)
+project_prefix = "portfolio-prod"
+
+# EC2 Configuration
+use_spot_instance = true  # Set to false for on-demand (more expensive but stable)
+ec2_instance_type = "t3.medium"  # t3.medium recommended for running 4 backends
+
+# Database Credentials
+postgres_password = "your-secure-password-here"  # Generate a strong password!
+
+# Application Secrets
+jwt_secret = "your-jwt-secret-here"  # Generate: openssl rand -base64 32
+app_secret_key = "your-app-secret-here"  # Generate: openssl rand -base64 32
+
+# API Keys
+openai_api_key = "sk-..."  # For rapidPhotoFlow AI service
+
+# S3 Configuration (bucket names must be globally unique)
+photos_bucket_name = "yourdomain-photos-storage"
+
+# Optional: Allowed IP for SSH (leave empty for your current IP)
+# Format: "1.2.3.4/32"
+allowed_ssh_ip = ""

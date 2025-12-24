@@ -1,0 +1,112 @@
+services:
+  # ===========================================
+  # REVERSE PROXY - Nginx
+  # ===========================================
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - portfolio-backend
+      - shipping-backend
+    networks:
+      - portfolio-network
+    restart: unless-stopped
+
+  # ===========================================
+  # DATABASES (Persistent Storage)
+  # ===========================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-portfolio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-portfolio}
+    volumes:
+      - /data/docker-volumes/postgres:/var/lib/postgresql/data
+    networks:
+      - portfolio-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-portfolio}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: redis-server --appendonly yes
+    volumes:
+      - /data/docker-volumes/redis:/data
+    networks:
+      - portfolio-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ===========================================
+  # TERMINAL PORTFOLIO
+  # ===========================================
+  portfolio-backend:
+    image: portfolio-backend:latest
+    container_name: portfolio-backend
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: ./data/portfolio.db
+      CORS_ORIGIN: https://portfolio.${DOMAIN:-basedsecurity.net}
+    volumes:
+      - /data/docker-volumes/portfolio-db:/app/data
+    networks:
+      - portfolio-network
+    restart: unless-stopped
+
+  # ===========================================
+  # SHIPPING MONITORING
+  # ===========================================
+  shipping-backend:
+    image: shipping-backend:latest
+    container_name: shipping-backend
+    environment:
+      NODE_ENV: production
+      PORT: 3003
+      POLLING_INTERVAL: 1800000
+    volumes:
+      - /data/docker-volumes/shipping-db:/app/data
+    networks:
+      - portfolio-network
+    restart: unless-stopped
+
+  # ===========================================
+  # BASEDSECURITY AI (Optional - requires more setup)
+  # ===========================================
+  # security-backend:
+  #   image: security-backend:latest
+  #   container_name: security-backend
+  #   environment:
+  #     APP_ENV: production
+  #     APP_SECRET_KEY: ${APP_SECRET_KEY}
+  #     JWT_SECRET_KEY: ${JWT_SECRET}
+  #     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-portfolio}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-portfolio}
+  #     REDIS_URL: redis://redis:6379/0
+  #     CORS_ORIGINS: https://security.${DOMAIN:-basedsecurity.net}
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - portfolio-network
+  #   restart: unless-stopped
+
+networks:
+  portfolio-network:
+    driver: bridge

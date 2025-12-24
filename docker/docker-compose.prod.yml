@@ -1,0 +1,234 @@
+version: '3.8'
+
+services:
+  # ===========================================
+  # REVERSE PROXY - Traefik
+  # ===========================================
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=admin@${DOMAIN}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      # Redirect HTTP to HTTPS
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certs:/letsencrypt
+    networks:
+      - portfolio-network
+    restart: unless-stopped
+
+  # ===========================================
+  # DATABASES
+  # ===========================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-portfolio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-portfolio}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    networks:
+      - portfolio-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-portfolio}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - portfolio-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ===========================================
+  # TERMINAL PORTFOLIO
+  # ===========================================
+  portfolio-backend:
+    build:
+      context: /opt/portfolio/repos/terminal-portfolio/backend
+      dockerfile: Dockerfile
+    container_name: portfolio-backend
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: ./data/portfolio.db
+      CORS_ORIGIN: https://portfolio.${DOMAIN}
+    volumes:
+      - portfolio-data:/app/data
+    networks:
+      - portfolio-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portfolio-api.rule=Host(`api.${DOMAIN}`) && PathPrefix(`/portfolio`)"
+      - "traefik.http.routers.portfolio-api.entrypoints=websecure"
+      - "traefik.http.routers.portfolio-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.portfolio-api.loadbalancer.server.port=3001"
+      - "traefik.http.middlewares.portfolio-strip.stripprefix.prefixes=/portfolio"
+      - "traefik.http.routers.portfolio-api.middlewares=portfolio-strip"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ===========================================
+  # RAPIDPHOTOFLOW
+  # ===========================================
+  photos-backend:
+    build:
+      context: /opt/portfolio/repos/rapidPhotoFlow/backend
+      dockerfile: Dockerfile
+    container_name: photos-backend
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-portfolio}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-portfolio}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET}
+      AI_SERVICE_URL: http://photos-ai:3002
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - portfolio-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.photos-api.rule=Host(`api.${DOMAIN}`) && PathPrefix(`/photos`)"
+      - "traefik.http.routers.photos-api.entrypoints=websecure"
+      - "traefik.http.routers.photos-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.photos-api.loadbalancer.server.port=8080"
+      - "traefik.http.middlewares.photos-strip.stripprefix.prefixes=/photos"
+      - "traefik.http.routers.photos-api.middlewares=photos-strip"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  photos-ai:
+    build:
+      context: /opt/portfolio/repos/rapidPhotoFlow/ai-service
+      dockerfile: Dockerfile
+    container_name: photos-ai
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    networks:
+      - portfolio-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ===========================================
+  # BASEDSECURITY AI
+  # ===========================================
+  security-backend:
+    build:
+      context: /opt/portfolio/repos/basedSecurity_AI/apps/api
+      dockerfile: Dockerfile
+    container_name: security-backend
+    environment:
+      APP_ENV: production
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-portfolio}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-portfolio}
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: https://security.${DOMAIN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - portfolio-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.security-api.rule=Host(`api.${DOMAIN}`) && PathPrefix(`/security`)"
+      - "traefik.http.routers.security-api.entrypoints=websecure"
+      - "traefik.http.routers.security-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.security-api.loadbalancer.server.port=8000"
+      - "traefik.http.middlewares.security-strip.stripprefix.prefixes=/security"
+      - "traefik.http.routers.security-api.middlewares=security-strip"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ===========================================
+  # SHIPPING MONITORING
+  # ===========================================
+  shipping-backend:
+    build:
+      context: /opt/portfolio/repos/shippingMonitoring
+      dockerfile: Dockerfile
+    container_name: shipping-backend
+    environment:
+      NODE_ENV: production
+      PORT: 3003
+      POLLING_INTERVAL: 1800000  # 30 minutes
+    volumes:
+      - shipping-data:/app/data
+    networks:
+      - portfolio-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.shipping-api.rule=Host(`api.${DOMAIN}`) && PathPrefix(`/shipping`)"
+      - "traefik.http.routers.shipping-api.entrypoints=websecure"
+      - "traefik.http.routers.shipping-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.shipping-api.loadbalancer.server.port=3003"
+      - "traefik.http.middlewares.shipping-strip.stripprefix.prefixes=/shipping"
+      - "traefik.http.routers.shipping-api.middlewares=shipping-strip"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3003/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  portfolio-network:
+    driver: bridge
+
+volumes:
+  traefik-certs:
+  postgres-data:
+  redis-data:
+  portfolio-data:
+  shipping-data:

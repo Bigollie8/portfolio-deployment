@@ -1,0 +1,79 @@
+{
+  "discord": {
+    "webhookUrl": "https://discord.com/api/webhooks/1449845683879280662/MQzf-Q-KyzpaXdFp5yeXifqoyBXBA9FUx6kUZ54o9rjPayA98fZP5BHoBjIf890ipJCE",
+    "enabled": true
+  },
+  "domain": "basedsecurity.net",
+  "awsRegion": "us-east-1",
+  "ec2": {
+    "host": "ec2-54-242-15-144.compute-1.amazonaws.com",
+    "user": "ubuntu",
+    "sshKeyPath": "~/.ssh/terminal-portfolio-deploy.pem"
+  },
+  "frontends": {
+    "portfolio": {
+      "repoPath": "terminal-portfolio/frontend",
+      "s3Bucket": "portfolio-prod-portfolio-frontend",
+      "cloudFrontId": "E15VHZ20NOJ0RE",
+      "buildCommand": "npm run build",
+      "distDir": "dist",
+      "url": "https://portfolio.basedsecurity.net"
+    },
+    "photos": {
+      "repoPath": "rapidPhotoFlow/frontend",
+      "s3Bucket": "portfolio-prod-photos-frontend",
+      "cloudFrontId": "E3G0IS14XDZD1G",
+      "buildCommand": "npm run build",
+      "distDir": "dist",
+      "url": "https://photos.basedsecurity.net"
+    },
+    "security": {
+      "repoPath": "basedSecurity_AI/web",
+      "s3Bucket": "portfolio-prod-security-frontend",
+      "cloudFrontId": "E3THVDXE9Y0OUH",
+      "buildCommand": "npm run build",
+      "distDir": "dist",
+      "url": "https://security.basedsecurity.net"
+    },
+    "shipping": {
+      "repoPath": "shippingMonitoring/client",
+      "s3Bucket": "portfolio-prod-shipping-frontend",
+      "cloudFrontId": "E2KOLBNNUKT40T",
+      "buildCommand": "npm run build",
+      "distDir": "dist",
+      "url": "https://shipping.basedsecurity.net"
+    }
+  },
+  "backends": {
+    "portfolio-backend": {
+      "repoPath": "terminal-portfolio/backend",
+      "dockerImage": "portfolio-backend",
+      "containerName": "portfolio-backend"
+    },
+    "photos-backend": {
+      "repoPath": "rapidPhotoFlow/backend",
+      "dockerImage": "photos-backend",
+      "containerName": "photos-backend"
+    },
+    "photos-ai": {
+      "repoPath": "rapidPhotoFlow/ai-service",
+      "dockerImage": "photos-ai",
+      "containerName": "photos-ai"
+    },
+    "security-backend": {
+      "repoPath": "basedSecurity_AI/api",
+      "dockerImage": "security-backend",
+      "containerName": "security-backend"
+    },
+    "shipping-backend": {
+      "repoPath": "shippingMonitoring/server",
+      "dockerImage": "shipping-backend",
+      "containerName": "shipping-backend"
+    },
+    "status-page": {
+      "repoPath": "status-page",
+      "dockerImage": "status-page",
+      "containerName": "status-page"
+    }
+  }
+}
