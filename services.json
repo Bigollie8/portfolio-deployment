@@ -3,7 +3,7 @@
   "domain": "basedsecurity.net",
   "awsRegion": "us-east-1",
   "ec2": {
-    "host": "ec2-54-242-15-144.compute-1.amazonaws.com",
+    "host": "54.147.126.55",
     "user": "ubuntu"
   },
   "discord": {
