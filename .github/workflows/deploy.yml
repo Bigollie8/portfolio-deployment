@@ -60,9 +60,9 @@ jobs:
           fi
 
           # Convert to JSON array
-          SERVICES_JSON=$(echo "$SERVICES" | tr ',' '\n' | jq -R . | jq -s .)
-          FRONTEND_JSON=$(echo "$FRONTEND_SERVICES" | tr ',' '\n' | jq -R . | jq -s .)
-          BACKEND_JSON=$(echo "$BACKEND_SERVICES" | tr ',' '\n' | jq -R . | jq -s .)
+          SERVICES_JSON=$(echo "$SERVICES" | tr ',' '\n' | jq -R . | jq -sc .)
+          FRONTEND_JSON=$(echo "$FRONTEND_SERVICES" | tr ',' '\n' | jq -R . | jq -sc .)
+          BACKEND_JSON=$(echo "$BACKEND_SERVICES" | tr ',' '\n' | jq -R . | jq -sc .)
 
           echo "services=$SERVICES_JSON" >> $GITHUB_OUTPUT
           echo "frontend_services=$FRONTEND_JSON" >> $GITHUB_OUTPUT
