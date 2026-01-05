@@ -61,8 +61,8 @@ param(
 $ErrorActionPreference = "Stop"
 $DOMAIN = "basedsecurity.net"
 $AWS_REGION = "us-east-1"
-$EC2_HOST = "ec2-54-242-15-144.compute-1.amazonaws.com"
-$EC2_USER = "ubuntu"
+$EC2_HOST = "98.88.74.174"
+$EC2_USER = "ec2-user"
 $SSH_KEY = "$env:USERPROFILE\.ssh\terminal-portfolio-deploy.pem"
 
 # Base paths (relative to this script)
