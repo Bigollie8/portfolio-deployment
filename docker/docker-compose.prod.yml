@@ -17,9 +17,7 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
       - "--certificatesresolvers.letsencrypt.acme.email=admin@${DOMAIN}"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-      # Redirect HTTP to HTTPS
-      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
-      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      # Note: CloudFront handles SSL termination, so no HTTP->HTTPS redirect needed
     ports:
       - "80:80"
       - "443:443"
@@ -87,8 +85,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.portfolio-api.rule=Host(`api.${DOMAIN}`) && PathPrefix(`/portfolio`)"
-      - "traefik.http.routers.portfolio-api.entrypoints=websecure"
-      - "traefik.http.routers.portfolio-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.portfolio-api.entrypoints=web"
       - "traefik.http.services.portfolio-api.loadbalancer.server.port=3001"
       - "traefik.http.middlewares.portfolio-strip.stripprefix.prefixes=/portfolio"
       - "traefik.http.routers.portfolio-api.middlewares=portfolio-strip"
@@ -108,12 +105,12 @@ services:
       dockerfile: Dockerfile
     container_name: photos-backend
     environment:
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: standalone
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-portfolio}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-portfolio}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       AWS_REGION: ${AWS_REGION:-us-east-1}
-      S3_BUCKET: ${S3_BUCKET}
+      S3_BUCKET_PHOTOS: ${S3_BUCKET}
       AI_SERVICE_URL: http://photos-ai:3002
       JWT_SECRET: ${JWT_SECRET}
     depends_on:
@@ -124,8 +121,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.photos-api.rule=Host(`api.${DOMAIN}`) && PathPrefix(`/photos`)"
-      - "traefik.http.routers.photos-api.entrypoints=websecure"
-      - "traefik.http.routers.photos-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.photos-api.entrypoints=web"
       - "traefik.http.services.photos-api.loadbalancer.server.port=8080"
       - "traefik.http.middlewares.photos-strip.stripprefix.prefixes=/photos"
       - "traefik.http.routers.photos-api.middlewares=photos-strip"
@@ -168,7 +164,7 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-portfolio}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-portfolio}
       REDIS_URL: redis://redis:6379/0
-      CORS_ORIGINS: https://security.${DOMAIN}
+      CORS_ORIGINS: '["https://security.${DOMAIN}"]'
     depends_on:
       postgres:
         condition: service_healthy
@@ -179,8 +175,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.security-api.rule=Host(`api.${DOMAIN}`) && PathPrefix(`/security`)"
-      - "traefik.http.routers.security-api.entrypoints=websecure"
-      - "traefik.http.routers.security-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.security-api.entrypoints=web"
       - "traefik.http.services.security-api.loadbalancer.server.port=8000"
       - "traefik.http.middlewares.security-strip.stripprefix.prefixes=/security"
       - "traefik.http.routers.security-api.middlewares=security-strip"
@@ -210,13 +205,41 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.shipping-api.rule=Host(`api.${DOMAIN}`) && PathPrefix(`/shipping`)"
-      - "traefik.http.routers.shipping-api.entrypoints=websecure"
-      - "traefik.http.routers.shipping-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.shipping-api.entrypoints=web"
       - "traefik.http.services.shipping-api.loadbalancer.server.port=3003"
       - "traefik.http.middlewares.shipping-strip.stripprefix.prefixes=/shipping"
       - "traefik.http.routers.shipping-api.middlewares=shipping-strip"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3003/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ===========================================
+  # STATUS PAGE
+  # ===========================================
+  status-page:
+    build:
+      context: /opt/portfolio/repos/status-page
+      dockerfile: Dockerfile
+    container_name: status-page
+    environment:
+      NODE_ENV: production
+      PORT: 3004
+      HOME_STATS_URL: https://stats.basedsecurity.net/stats
+      HOME_STATS_KEY: home-stats-secret-key
+    volumes:
+      - status-data:/app/data
+    networks:
+      - portfolio-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.status-page.rule=Host(`status.${DOMAIN}`)"
+      - "traefik.http.routers.status-page.entrypoints=web"
+      - "traefik.http.services.status-page.loadbalancer.server.port=3004"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3004/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -232,3 +255,4 @@ volumes:
   redis-data:
   portfolio-data:
   shipping-data:
+  status-data:
