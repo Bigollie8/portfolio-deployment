@@ -525,7 +525,7 @@ function Deploy-Backend {
         Push-Location $path
 
         # Build Docker image
-        docker build -t "${image}:latest" .
+        docker build --no-cache -t "${image}:latest" .
         if ($LASTEXITCODE -ne 0) { throw "Docker build failed" }
 
         # Save image to tar
