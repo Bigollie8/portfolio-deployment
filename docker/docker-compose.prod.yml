@@ -220,9 +220,7 @@ services:
   # STATUS PAGE
   # ===========================================
   status-page:
-    build:
-      context: /opt/portfolio/repos/status-page
-      dockerfile: Dockerfile
+    image: status-page:latest
     container_name: status-page
     environment:
       NODE_ENV: production
