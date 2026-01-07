@@ -546,7 +546,8 @@ function Deploy-Backend {
         $sshCommands = @"
 docker load -i /tmp/${image}.tar && \
 rm /tmp/${image}.tar && \
-cd /home/ubuntu/deployment && \
+cd /opt/portfolio/deployment && \
+git pull origin master --quiet && \
 docker-compose stop $container && \
 docker-compose rm -f $container && \
 docker-compose up -d $container
