@@ -543,11 +543,17 @@ function Deploy-Backend {
 
         # Load and restart on EC2
         Write-Host "Loading image and restarting container on EC2..."
+        # Also copy docker-compose.prod.yml if it changed
+        $composeFile = "$PSScriptRoot\..\docker\docker-compose.prod.yml"
+        if (Test-Path $composeFile) {
+            Write-Host "Syncing docker-compose.prod.yml..."
+            scp -i $SSH_KEY -o StrictHostKeyChecking=no $composeFile "${EC2_USER}@${EC2_HOST}:/opt/portfolio/deployment/docker-compose.yml"
+        }
+
         $sshCommands = @"
 docker load -i /tmp/${image}.tar && \
 rm /tmp/${image}.tar && \
 cd /opt/portfolio/deployment && \
-git pull origin master --quiet && \
 docker-compose stop $container && \
 docker-compose rm -f $container && \
 docker-compose up -d $container
